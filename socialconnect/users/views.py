@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from .models import User, Follow
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 from .serializers import UserRegistrationSerializer, UserLoginSerializer, UserSerializer
 
 
@@ -29,10 +30,13 @@ class UserLoginView(APIView):
     def post(self, request):
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
-            email = serializer.validated_data.get('email')
+            username = serializer.validated_data.get('username')
             password = serializer.validated_data.get('password')
-            user = authenticate(email=email, password=password)
+            user = authenticate(username=username, password=password)
             if user:
+                if not user.is_active:
+                    user.is_active = True
+                    user.save()
                 refresh_token = RefreshToken.for_user(user)
                 return Response({
                     "user": UserSerializer(user).data,
@@ -45,16 +49,21 @@ class UserLoginView(APIView):
             
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
-    def get(self, request,user_id):
+    def get(self, request,user_name):
         try:
-            user = User.objects.get(user_id=user_id)
+            if user_name:
+                user = User.objects.get(username=user_name)
         except User.DoesNotExist:
             return Response({"error": "User does not exist"}, status=status.HTTP_404_NOT_FOUND)
+        
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
     
-    def patch(self, request, user_id):
+    def patch(self, request, user_name):
         try:
-            user = User.objects.get(user_id=user_id)
+            user = User.objects.get(username=user_name)
+            data = request.data
+            if 'username' in data:
+                return Response({'error': 'Cannot change username'}, status=status.HTTP_400_BAD_REQUEST)
         except User.DoesNotExist:
             return Response({"error": "User does not exist"}, status=status.HTTP_404_NOT_FOUND)
         serializer = UserSerializer(user, data=request.data, partial=True)
@@ -64,11 +73,32 @@ class UserProfileView(APIView):
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
+    def delete(self, request, user_name):
+        try:
+            user = User.objects.get(username=user_name)
+        except User.DoesNotExist:
+            return Response({"error": "User does not exist"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Blacklist all tokens associated with the user
+        user.user_deactivate()
+        
+        return Response({"message":"User deactivated"}, status=status.HTTP_204_NO_CONTENT)
+    
+class SearchUsersView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        query = request.query_params.get('q')
+        users = User.objects.all()
+        if query:
+            users = users.filter(username__icontains=query)
+        serializer = UserSerializer(users, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
 class FollowUserView(APIView):
     permission_classes = [IsAuthenticated]
-    def post(self, request, user_id):
+    def post(self, request, user_name):
         try:
-            user_to_follow = User.objects.get(user_id=user_id)
+            user_to_follow = User.objects.get(username=user_name)
         except User.DoesNotExist:
             return Response({"error": "User does not exist"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -83,9 +113,9 @@ class FollowUserView(APIView):
 
 class UnfollowUserView(APIView):
     permission_classes = [IsAuthenticated]
-    def post(self, request, user_id):
+    def post(self, request, user_name):
         try:
-            user_to_unfollow = User.objects.get(pk=user_id)
+            user_to_unfollow = User.objects.get(username=user_name)
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
         

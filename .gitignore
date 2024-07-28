@@ -3,6 +3,23 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+
+.vscode
+# Ignore migrations folder
+migrations/
+
+# Ignore virtual environment
+myenv/
+
+# Ignore other files and directories
+*.pyc
+*.pyo
+__pycache__/
+*.log
+*.sqlite3
+*.pot
+*.po
+*.mo
 # C extensions
 *.so
 
